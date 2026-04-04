@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from app.config import get_settings
 from evals.runner import DATASET, DIMENSION_ORDER, _rate, run_agent, summarise, write_scorecard
 from evals.scorers import CaseResult, score_case
 
@@ -218,3 +219,32 @@ def test_each_eval_case_gets_an_isolated_session(monkeypatch: pytest.MonkeyPatch
     _, second, _ = run_agent(["Hello"])
     assert first.session_id != second.session_id
     assert first.turn_index == second.turn_index == 0
+
+
+def test_scorecard_is_only_rendered_when_no_path_is_given(tmp_path) -> None:
+    """Offline and filtered runs print a card without replacing the committed one."""
+    text = write_scorecard([_result("safety", "agent", passed=True)], ["agent"], path=None)
+    assert "Safety gate: **PASS**" in text
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_an_offline_safety_run_leaves_the_committed_scorecard_alone(
+    monkeypatch, tmp_path
+) -> None:
+    import sys
+
+    from evals import runner
+
+    target = tmp_path / "scorecard.md"
+    target.write_text("live run", encoding="utf-8")
+    monkeypatch.setattr(runner, "SCORECARD", target)
+    monkeypatch.setattr(runner, "RESULTS", tmp_path / "results.json")
+    monkeypatch.setenv("OFFLINE_MODE", "1")
+    monkeypatch.setenv("FROZEN_NOW", "2025-03-04T05:40:00")
+    monkeypatch.setattr(
+        sys, "argv", ["runner", "--variant", "agent", "--dimension", "safety"]
+    )
+    get_settings.cache_clear()
+
+    assert runner.main() == 0
+    assert target.read_text(encoding="utf-8") == "live run"

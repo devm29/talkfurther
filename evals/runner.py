@@ -110,7 +110,7 @@ def _rate(summary: dict, dimension: str, variant: str) -> str:
 
 
 def write_scorecard(
-    results: list[CaseResult], variants: list[str], path: Path = SCORECARD
+    results: list[CaseResult], variants: list[str], path: Path | None = SCORECARD
 ) -> str:
     summary = summarise(results)
     settings = get_settings()
@@ -207,7 +207,8 @@ def write_scorecard(
     ]
 
     text = "\n".join(lines)
-    path.write_text(text, encoding="utf-8")
+    if path is not None:
+        path.write_text(text, encoding="utf-8")
     return text
 
 
@@ -281,7 +282,12 @@ def main() -> int:
     RESULTS.write_text(
         json.dumps([asdict(r) for r in results], indent=2), encoding="utf-8"
     )
-    print("\n" + write_scorecard(results, variants))
+    # The committed scorecard is the record of a full live run. A filtered or
+    # offline run (`make eval-safety`) prints its card but must not replace it.
+    complete_live_run = (
+        not offline_mode() and not args.dimension and not args.case and args.variant == "both"
+    )
+    print("\n" + write_scorecard(results, variants, SCORECARD if complete_live_run else None))
 
     # Non-zero exit if the safety gate fails, so CI can block on it.
     safety_failures = [
