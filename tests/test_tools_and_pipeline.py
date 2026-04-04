@@ -156,6 +156,27 @@ def test_outside_hours_is_declined() -> None:
     assert "outside tour hours" in (result.reason or "")
 
 
+def test_last_slot_hour_is_named_correctly_when_declining() -> None:
+    """Tours run until 18:00, so the last one starts at 17:00. The old message
+    said 18:00 was outside hours "we run 9:00 to 18:00", contradicting itself."""
+    result = tour.check_availability("Tuesday", "6pm")
+    assert not result.available
+    assert "between 9:00 and 17:00" in (result.reason or "")
+
+
+def test_a_half_hour_request_is_not_booked_as_the_hour() -> None:
+    """'2:30pm' used to confirm the 2:00 PM slot: a time nobody asked for."""
+    result = tour.check_availability("Tuesday", "2:30pm")
+    assert not result.available
+    assert result.reason == "Tours start on the hour."
+    assert result.alternatives
+    assert not tour.book_tour("Tuesday", "2:30pm").confirmed
+
+
+def test_an_on_the_hour_time_with_minutes_is_still_bookable() -> None:
+    assert tour.check_availability("Tuesday", "2:00pm").available
+
+
 def test_past_date_is_declined() -> None:
     result = tour.check_availability("2024-01-05", "10am")
     assert not result.available

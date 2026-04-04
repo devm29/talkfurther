@@ -153,6 +153,17 @@ def resolve_time(expression: str) -> int | None:
     return None
 
 
+def _past_the_hour(expression: str) -> bool:
+    """True when a time names minutes past the hour, e.g. '2:30pm'.
+
+    `resolve_time` keeps only the hour, which is right for working out which
+    slot is meant, but tours start on the hour: booking '2:30' as the 2:00 slot
+    would confirm a time the person never asked for.
+    """
+    m = re.search(r"\b\d{1,2}:(\d{2})(?!\d)", expression)
+    return bool(m) and int(m.group(1)) != 0
+
+
 # ─── Mock availability ───────────────────────────────────────────────────────
 
 
@@ -261,12 +272,26 @@ def check_availability(date_expression: str, time_expression: str = "") -> Avail
             resolved_date=resolved.isoformat(),
             available=False,
             reason=(
-                f"{hour}:00 is outside tour hours — we run "
-                f"{settings.tour_open_hour}:00 to {settings.tour_close_hour}:00."
+                f"{hour}:00 is outside tour hours — tours start between "
+                f"{settings.tour_open_hour}:00 and {settings.tour_close_hour - 1}:00."
             ),
             alternatives=[
                 _slot(resolved, h) for h in _open_hours() if not _is_booked(resolved, h)
             ][:3],
+        )
+
+    if _past_the_hour(time_expression or combined):
+        nearby = [
+            _slot(resolved, h)
+            for h in (hour, hour + 1)
+            if h in _open_hours() and not _is_booked(resolved, h)
+        ]
+        return AvailabilityResult(
+            requested_understood=True,
+            resolved_date=resolved.isoformat(),
+            available=False,
+            reason="Tours start on the hour.",
+            alternatives=nearby or _next_available(resolved + timedelta(days=1)),
         )
 
     if _is_booked(resolved, hour):
