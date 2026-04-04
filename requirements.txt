@@ -1,7 +1,7 @@
-fastapi>=0.115
-uvicorn[standard]>=0.30
-openai>=1.92          # chat.completions.parse (non-beta) — earlier versions only have beta
-pydantic>=2.8
-email-validator>=2.2
-pyyaml>=6.0
-python-dotenv>=1.0
+fastapi>=0.162
+uvicorn[standard]>=0.54
+openai>=3.46,<4      # chat.completions.parse; the SDK breaks its API across majors
+pydantic>=2.14
+email-validator>=2.3
+pyyaml>=6.0.3
+python-dotenv>=1.2
