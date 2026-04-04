@@ -1,0 +1,39 @@
+# Virtual environments
+.venv/
+venv/
+project_venv/
+node_modules/
+
+# Python bytecode and tool caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Coverage
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Build output
+build/
+dist/
+*.egg-info/
+
+# Secrets: only the template is tracked
+.env
+.env.*
+!.env.example
+
+# Runtime sinks written by the app and the eval runner
+traces.jsonl
+captured_records.jsonl
+evals/results.json
+*.log
+logs/
+tmp/
+
+.DS_Store
+PRESENTATION.md
