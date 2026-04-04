@@ -8,24 +8,34 @@ triage, diagnosis or advice; its crisis handling is escalation and resources onl
 
 ## Run it
 
+The shortest path needs only Docker, and no API key:
+
 ```bash
-make install     # venv + dependencies
+OFFLINE_MODE=1 docker compose up --build    # http://localhost:8910
+```
+
+For development, with Python 3.12 (pinned in `.python-version`) and `make`:
+
+```bash
+make install     # .venv + dependencies
 make demo        # http://localhost:8000 — no API key needed
 
-make test        # 399 tests, no key, no network, under two seconds
-make test-cov    # the same run with coverage — 89% over app/ and evals/
+make test        # 410 tests, no key, no network, under two seconds
+make test-cov    # the same run with coverage — 92% over app/ and evals/
+make lint        # ruff
 make eval-safety # the safety gate; deterministic, so it runs offline
 make eval        # full suite, new pipeline vs. the original prompt. Needs a key.
 ```
 
-`make demo` sets `OFFLINE_MODE=1`, swapping the model for the scripted double in
+`OFFLINE_MODE=1` (which `make demo` sets) swaps the model for the scripted double in
 `app/testing/fake_llm.py`. Routing, retrieval, the crisis floor, the egress allowlist and cost
 accounting are all the production code paths; only the *wording* is scripted, so draw no
 conclusion about response quality from that mode — and the header badge says
 `offline · scripted double` on screen so a screenshot cannot pass for a live one. For live
 turns, copy `.env.example` to `.env`, add `OPENAI_API_KEY`, then `make run` (or
-`make run PORT=8910`). The surface is `POST /chat`, `GET /traces?limit=&session_id=`,
-`GET /health`, and `GET /` for the UI.
+`docker compose up --build`, which reads the key from `.env`). The surface is `POST /chat`,
+`GET /traces?limit=&session_id=`, `GET /health`, and `GET /` for the UI; examples are under
+[The API](#the-api).
 
 `.env.example` lists every variable, and `app/config.py` reads each through `default_factory` so
 environment overrides actually take effect. None is required to boot. `AGENT_MODEL` (`gpt-4o`)
@@ -151,11 +161,13 @@ question or a bare acknowledgement. *"We accept Medicaid."* (we do not) is five 
 digits, and is exactly what a length-based gate waves through. Date resolution, business hours
 and slot validation are likewise Python and Pydantic rather than model judgment: `"next Sunday
 at 3pm"` is refused by a calendar — tours are Monday to Friday — not by an instruction the
-model may or may not follow.
+model may or may not follow, and `"2:30pm"` is refused because tours start on the hour, rather
+than quietly booked as 2:00.
 
 ## Screens
 
-Every turn records what was retrieved, which guardrails ran, and what each one decided.
+The chat pane is the admissions desk; the dark pane beside it is the audit console. Every turn
+records what was retrieved, which guardrails ran, and what each one decided.
 
 ![Chat and turn traces](docs/screenshots/01-chat-and-traces.png)
 
@@ -164,14 +176,79 @@ hand-written, version-controlled text.
 
 ![Deterministic crisis bypass](docs/screenshots/02-crisis-bypass.png)
 
-One trace in full — intent, fact IDs, both verdicts, per-stage latency, per-turn cost — and the
-narrow viewport, where the panel collapses and the conversation stays usable:
+One trace in full — intent, fact IDs, both verdicts, per-stage latency, per-turn cost:
 
 ![A single turn trace](docs/screenshots/03-turn-trace.png)
-![Narrow viewport](docs/screenshots/04-narrow-viewport.png)
 
-All four came from Playwright and Chromium driving the real `/chat` endpoint against the app on
-`OFFLINE_MODE=1` with no API key, which is why the badge reads `OFFLINE · SCRIPTED DOUBLE`.
+On a phone the two panes become one, switched from the header, so the traces stay reachable:
+
+<p>
+  <img src="docs/screenshots/04-narrow-viewport.png" alt="Conversation at 390px wide" width="260" />
+  <img src="docs/screenshots/05-narrow-traces.png" alt="Trace console at 390px wide" width="260" />
+</p>
+
+All of them came from Playwright and Chromium (1440×900 and 390×844) driving the real `/chat`
+endpoint against the app on `OFFLINE_MODE=1` with no API key, which is why the badge reads
+`OFFLINE · SCRIPTED DOUBLE`. [`00-empty-state.png`](docs/screenshots/00-empty-state.png) shows
+the first visit.
+
+## The API
+
+Captured from the Docker image on `OFFLINE_MODE=1` with `FROZEN_NOW=2025-03-04T05:40:00`
+(a Tuesday), so the wording comes from the scripted double while routing, retrieval, guardrails
+and accounting are real. Traces are trimmed to the fields that matter.
+
+```http
+GET /health
+```
+
+```json
+{"status": "ok", "facts_loaded": 47, "agent_model": "gpt-4o", "guard_model": "gpt-4o-mini",
+ "crisis_classifier": true, "grounding_verifier": true,
+ "api_key_configured": false, "offline_mode": true}
+```
+
+```http
+POST /chat
+{"message": "Does next Sunday at 3pm work for a tour?"}
+```
+
+```json
+{
+  "response": "We aren't able to host tours on Saturdays or Sundays. We offer tours Monday through Friday, 9:00 AM to 6:00 PM. Is there anything else I can check for you?",
+  "session_id": "43bb2670f706",
+  "trace": {
+    "intent": "tour_scheduling",
+    "retrieved_fact_ids": ["tour.hours", "tour.weekend_closed", "contact.phone", "contact.address"],
+    "deterministic_verdict": {"passed": true, "violations": []},
+    "grounding_verdict": {"passed": true, "violations": []},
+    "tokens": {"prompt": 280, "completion": 85, "calls": 4},
+    "estimated_cost_usd": 0.00155
+  }
+}
+```
+
+The same session, next turn:
+
+```http
+POST /chat
+{"message": "I took too many pills, I don't feel okay", "session_id": "43bb2670f706"}
+```
+
+```json
+{
+  "response": "This sounds like a medical emergency, and I want you to get help right now.\n\nPlease call 911 immediately, ... Poison Control at 1-800-222-1222 ...",
+  "trace": {
+    "crisis": {"category": "overdose_medical_emergency", "detected_by": "deterministic", "matched": "took too many"},
+    "tokens": {"prompt": 0, "completion": 0, "calls": 0},
+    "estimated_cost_usd": 0.0
+  }
+}
+```
+
+`session_id` is optional; when given it must be 1–64 characters of `A-Z a-z 0-9 _ -`. A failed
+turn returns `500 {"detail": "Turn failed."}` and logs the cause server-side rather than echoing
+it. `GET /traces?limit=1..200&session_id=…` returns the most recent traces, newest first.
 
 ## Scored against the original prompt
 
@@ -228,11 +305,9 @@ and its docstring records that 42 of them were wrong before the rule was fixed.
 `Dockerfile` is multi-stage, runs as a non-root user, and healthchecks `/health`, which
 parses the knowledge base — so a healthy container is one that can answer a turn, not one
 whose port is open. `docker-compose.yml` publishes on host port 8910 and keeps traces in a
-named volume. `docker compose config` parses cleanly.
-
-> Per this repo's uplift report, both **Build verified** and **Boot verified** read
-> `NOT RUN — deferred, Docker off`. Neither the image build nor a boot has been run here.
-> Treat both as unverified.
+named volume. The runtime image has been built and booted with `OFFLINE_MODE=1` and no
+network: the healthcheck reports `healthy`, the process runs as `further`, and the API examples
+above came from it.
 
 ## Assumptions I had to make
 
@@ -251,8 +326,10 @@ hash of the date and hour so it is realistic *and* deterministic.
 
 - **Bare small integers escape the deterministic numeric check** — deliberate, but it means
   `"we have 8 rooms"` rests entirely on the semantic verifier, which is a single judge.
-- **Sessions are in-memory**, so the app is single-worker today. `SessionStore` is the seam;
-  the swap is one file.
+- **Sessions are in-memory**, so the app is single-worker today, and neither sessions nor the
+  per-session lock table are ever evicted. `SessionStore` is the seam; the swap is one file.
+- **`/traces` has no authentication** and returns every session's messages. It is a demo
+  console, not something to expose beyond a trusted network.
 - **The crisis pattern list is English-only** and enumerative. The classifier is the
   generalisation layer; disable it and coverage narrows to exactly what is listed. The
   resource numbers are US-specific and would need localising.
@@ -278,3 +355,7 @@ it. Two smaller ones are documented where they happened, in the lookbehind comme
 `app/guardrails/egress.py` and the `default_factory` docstring in `app/config.py`. The pattern
 held: good at code with a clear spec, unreliable at deciding what the spec should be, and
 confidently wrong at exactly the boundaries that matter most.
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).

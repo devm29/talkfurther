@@ -17,7 +17,7 @@ distinction matters when something looks wrong.
 ## 0. Preflight
 
 ```bash
-cd further-bh-agent
+cd talkfurther
 ```
 
 **0.1 — Deterministic layers, no key needed**
@@ -25,7 +25,7 @@ cd further-bh-agent
 ```bash
 make test
 ```
-Expect: `72 passed`. If this fails, stop — nothing downstream will be meaningful.
+Expect: `410 passed`. If this fails, stop — nothing downstream will be meaningful.
 
 **0.2 — Safety gate, no key needed**
 
