@@ -102,7 +102,28 @@ def test_chat_maps_a_pipeline_failure_to_500_not_a_traceback(
     monkeypatch.setattr("app.main._pipeline.handle", boom)
     response = client.post("/chat", json={"message": "hello"})
     assert response.status_code == 500
-    assert "knowledge base unavailable" in response.json()["detail"]
+    assert response.json()["detail"] == "Turn failed."
+
+
+def test_chat_does_not_echo_internal_error_text(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("Incorrect API key provided: sk-proj-abcdef")
+
+    monkeypatch.setattr("app.main._pipeline.handle", boom)
+    assert "sk-proj" not in client.post("/chat", json={"message": "hello"}).text
+
+
+@pytest.mark.parametrize("session_id", ["", "a" * 65, "../etc", "id with spaces"])
+def test_chat_rejects_a_malformed_session_id(client: TestClient, session_id: str) -> None:
+    payload = {"message": "Hi", "session_id": session_id}
+    assert client.post("/chat", json=payload).status_code == 422
+
+
+def test_chat_accepts_a_client_chosen_session_id(client: TestClient) -> None:
+    body = client.post("/chat", json={"message": "Hi", "session_id": "kiosk-01"}).json()
+    assert body["session_id"] == "kiosk-01"
 
 
 # ─── /traces ──────────────────────────────────────────────────────────────────

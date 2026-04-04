@@ -7,6 +7,7 @@ agent and its traces reachable, not to be a product.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -23,6 +24,8 @@ from app.pipeline import Pipeline
 
 WEB_DIR = Path(REPO_ROOT / "web")
 MAX_TRACE_PAGE = trace_sink.RING_SIZE
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -43,7 +46,9 @@ _pipeline = Pipeline()
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
-    session_id: str | None = None
+    # Client-chosen IDs become keys in the in-memory store and the per-session
+    # lock table, so they are bounded to the shape the server itself issues.
+    session_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
 
 
 class ChatResponse(BaseModel):
@@ -57,7 +62,10 @@ def chat(request: ChatRequest) -> ChatResponse:
     try:
         result = _pipeline.handle(request.message, request.session_id)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Turn failed: {exc}") from exc
+        # The exception text can carry upstream error bodies or file paths, so it
+        # goes to the server log and the client gets a fixed message.
+        logger.exception("chat turn failed")
+        raise HTTPException(status_code=500, detail="Turn failed.") from exc
     return ChatResponse(
         response=result.response,
         session_id=result.session_id,
